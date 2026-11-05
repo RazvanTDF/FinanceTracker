@@ -57,16 +57,15 @@ func run() error {
 		})
 	})
 
-	// The identity page. Replace the placeholders with your own details; the
-	// marking script reads this page.
+	// The identity page. The marking script reads this page.
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!doctype html><html lang="en"><meta charset="utf-8">
-<title>%s</title><body>
-<h1>%s</h1>
-<p>[Surname Firstname], group [group]</p>
-<p>Project [number]: [title]</p>
-</body></html>`, version.Current().App, version.Current().App)
+		fmt.Fprint(w, `<!doctype html><html lang="en"><meta charset="utf-8">
+<title>Personal Finance Tracker</title><body>
+<h1>Personal Finance Tracker</h1>
+<p>Todor Ovidiu-Razvan, group 1</p>
+<p>Project 2: Personal Finance Tracker</p>
+</body></html>`)
 	})
 
 	// Discards everything the service holds, so tests can start from a known
