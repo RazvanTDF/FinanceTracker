@@ -1,62 +1,88 @@
-# [Project title]
+# Personal Finance Tracker
 
-[One paragraph: what this program does and who would use it. Replace this
-whole file — it is your project's front door, and it is marked.]
+A small web service for keeping track of what you earn and spend. Transactions
+come in from a bank's CSV export or are added by hand, rules you write sort
+them into categories, and a monthly report adds them up exactly and tells you
+which categories went over budget. It is meant for one person watching their
+own money.
 
-- **Student:** [Surname Firstname], group [group]
-- **Project:** [number and title from the project description]
+- **Student:** Todor Ovidiu-Razvan, group 1
+- **Project:** 2, Personal Finance Tracker
 - **Language:** Go
 
 ## What it does
 
-[Two or three paragraphs. What problem it solves, what it does not do, and
-what state it is in.]
+The service speaks JSON over HTTP on port 8080. Amounts are always JSON
+strings with two decimals, negative for money going out (`"-12.50"`), and are
+held internally as whole cents in an `int64`, never as a floating-point
+number, so `"0.10"` plus `"0.20"` is `"0.30"` every time.
+
+A CSV import does not trust the file: a malformed row is rejected and reported
+with its line number and the reason, and the rest of the file is still
+imported. A transaction without a category gets one from the first rule in
+`/rules` whose `match` it satisfies, or `uncategorised` if none does.
+
+It does not handle multiple users, multiple currencies, or bank connections.
+Data lives in memory and is lost when the service stops.
+
+**Current state (November 2026):** the four common routes work; the finance
+routes are being built one at a time.
+
+| Route | Method | State |
+| --- | --- | --- |
+| `/health`, `/version`, `/` | GET | done |
+| `/reset` | POST | done |
+| `/transactions` | POST | planned |
+| `/transactions/import` | POST | planned |
+| `/transactions` | GET | planned |
+| `/rules` | PUT | planned |
+| `/budgets` | PUT | planned |
+| `/reports/monthly` | GET | planned |
 
 ## How to run it
 
 ```
-docker run --rm -p 8080:8080 ghcr.io/[user]/[repo]:latest
+docker run --rm -p 8080:8080 ghcr.io/razvantdf/financetracker:latest
 ```
 
-To build and run without Docker:
+To build and run without Docker (Go 1.27):
 
 ```
 go run ./cmd/app
 go run ./cmd/app --version
+go test ./...
+```
+
+To build the image yourself:
+
+```
+docker build -t financetracker .
+docker run --rm -p 8080:8080 financetracker
 ```
 
 ## What you should see
 
-[What a successful run looks like. If it is a service, one request and its
-response. If it is a tool, one command and its output. A reader who has never
-seen your project must be able to tell whether it worked.]
+```
+$ curl -i http://localhost:8080/health
+HTTP/1.1 200 OK
+Content-Type: application/json
 
----
+{"status":"ok","uptime_seconds":3}
+```
 
-## Before you delete these notes
+`http://localhost:8080/` in a browser shows the project and student details,
+and `/version` reports the commit the image was built from.
 
-**Fill in `atad.json` first.** Name, group, student id, email, project number
-and title, language, and the command that runs your project. The marking script reads this file. A field left as
-`[placeholder]` counts as missing.
+The check this project is built around, once import and reports exist: import
+two expenses of `-0.10` and `-0.20` plus one broken row, then ask for the
+month.
 
-**`--version` is part of the contract.** It must print one line of JSON with
-`app`, `version`, `commit` and `built_at`, and exit 0. The `commit` value is
-stamped into the binary by the Dockerfile from the SHA that CI supplies, which
-is how it is proved that the published image was built from the code you
-submitted. Do not print it yourself, and do not remove the test that checks it.
+```
+curl -i -H "Content-Type: application/json" \
+  -d '{"csv":"date,amount,description\n2026-10-01,-0.10,coffee\n2026-10-01,-0.20,tea\n2026-13-45,xx,broken"}' \
+  http://localhost:8080/transactions/import
+curl -i "http://localhost:8080/reports/monthly?month=2026-10"
+```
 
-**The four contract routes are not optional.** `/health`, `/version`, `/` and
-`POST /reset` must answer exactly as the project document specifies, in every
-project. They are checked automatically, and a right answer with the wrong
-status code is a wrong answer.
-
-**Layout.** `cmd/app` is the entry point, `internal/` is your own packages,
-and `docs/` holds your documentation. Add packages under `internal/` as the
-project grows; a single 800-line `main.go` is not a design.
-
-**`docs/` has fixed names.** `docs/architecture.md` is due in week 7 and
-`docs/report.docx` at the end. `docs/README.md` explains both — read it, and do
-not edit or delete it.
-
-**Do not commit** `coverage/`, build output, or anything with a credential in
-it. `.gitignore` already covers the usual cases.
+The import reports two rows imported and line 4 rejected; the report's
+`total_out` is exactly `"-0.30"`.
