@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"atad-project/internal/store"
 	"atad-project/internal/version"
 )
 
@@ -41,6 +42,39 @@ func run() error {
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      newMux(store.New()),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Shut down cleanly on Ctrl-C or on the signal Docker sends when stopping
+	// the container, so in-flight requests are allowed to finish.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		log.Info("listening", "addr", srv.Addr, "commit", version.Current().Commit)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		log.Info("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	}
+}
+
+func newMux(st *store.Store) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// ---- the common contract: four routes, identical in every project -------
@@ -72,42 +106,15 @@ func run() error {
 	// state without restarting the container. If your project persists data,
 	// this clears what was persisted too.
 	mux.HandleFunc("POST /reset", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: clear your own state here.
+		st.Reset()
 		w.WriteHeader(http.StatusNoContent)
 	})
 
 	// ---- your own routes go below -------------------------------------------
 
-	srv := &http.Server{
-		Addr:         ":8080",
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	mux.HandleFunc("POST /transactions", createTransaction(st))
 
-	// Shut down cleanly on Ctrl-C or on the signal Docker sends when stopping
-	// the container, so in-flight requests are allowed to finish.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	errCh := make(chan error, 1)
-	go func() {
-		log.Info("listening", "addr", srv.Addr, "commit", version.Current().Commit)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		log.Info("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return srv.Shutdown(shutdownCtx)
-	}
+	return mux
 }
 
 // writeJSON is the one place that sets the content type, so every response in
