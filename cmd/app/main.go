@@ -113,6 +113,7 @@ func newMux(st *store.Store) *http.ServeMux {
 	// ---- your own routes go below -------------------------------------------
 
 	mux.HandleFunc("POST /transactions", createTransaction(st))
+	mux.HandleFunc("POST /transactions/import", importTransactions(st))
 
 	return mux
 }

@@ -62,3 +62,44 @@ func TestResetRestartsIDs(t *testing.T) {
 		t.Error("first id after reset is not 1")
 	}
 }
+
+func TestImportCourseExample(t *testing.T) {
+	st := store.New()
+	rec := post(t, newMux(st), "/transactions/import",
+		`{"csv":"date,amount,description\n2026-10-01,-0.10,coffee\n2026-10-01,-0.20,tea\n2026-13-45,xx,broken"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200: %s", rec.Code, rec.Body)
+	}
+	var got struct {
+		Imported int `json:"imported"`
+		Rejected []struct {
+			Line   int    `json:"line"`
+			Reason string `json:"reason"`
+		} `json:"rejected"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Imported != 2 || len(got.Rejected) != 1 || got.Rejected[0].Line != 4 || got.Rejected[0].Reason == "" {
+		t.Errorf("unexpected body: %s", rec.Body)
+	}
+	if n := len(st.All()); n != 2 {
+		t.Errorf("%d transactions stored; want 2", n)
+	}
+}
+
+func TestImportWithNothingRejected(t *testing.T) {
+	rec := post(t, newMux(store.New()), "/transactions/import", `{"csv":"2026-10-01,-1.00,bread"}`)
+	if !strings.Contains(rec.Body.String(), `"rejected":[]`) {
+		t.Errorf("rejected should be an empty list, not null: %s", rec.Body)
+	}
+}
+
+func TestImportRejectsBadBody(t *testing.T) {
+	for _, body := range []string{`{}`, `{"csv":42}`, `not json`} {
+		rec := post(t, newMux(store.New()), "/transactions/import", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("body %s: status %d; want 400", body, rec.Code)
+		}
+	}
+}

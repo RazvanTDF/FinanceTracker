@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"atad-project/internal/csvimport"
 	"atad-project/internal/money"
 	"atad-project/internal/store"
 )
@@ -49,9 +50,39 @@ func (in transactionInput) validate() (store.Transaction, error) {
 	if desc == "" {
 		return store.Transaction{}, errors.New("description is required")
 	}
-	category := strings.TrimSpace(in.Category)
+	return store.Transaction{Date: in.Date, Amount: *in.Amount, Description: desc, Category: categorise(in.Category)}, nil
+}
+
+// categorise keeps the category the user gave, or falls back to "uncategorised".
+func categorise(category string) string {
+	category = strings.TrimSpace(category)
 	if category == "" {
-		category = "uncategorised"
+		return "uncategorised"
 	}
-	return store.Transaction{Date: in.Date, Amount: *in.Amount, Description: desc, Category: category}, nil
+	return category
+}
+
+func importTransactions(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			CSV *string `json:"csv"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.CSV == nil {
+			writeError(w, http.StatusBadRequest, "validation", `body must be a JSON object with the file as a "csv" string`)
+			return
+		}
+		rows, rejected := csvimport.Parse(*in.CSV)
+		for _, row := range rows {
+			st.Add(store.Transaction{
+				Date:        row.Date,
+				Amount:      row.Amount,
+				Description: row.Description,
+				Category:    categorise(row.Category),
+			})
+		}
+		if rejected == nil {
+			rejected = []csvimport.Rejection{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"imported": len(rows), "rejected": rejected})
+	}
 }
